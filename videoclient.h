@@ -2,13 +2,16 @@
 #define VIDEOCLIENT_H
 
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h> // 包含IPv4和IPv6地址的文本表示与二进制格式之间的转换的函数
 #include <fcntl.h>
+#include <sys/signal.h>
 #include <cstring>
 
 #include <iostream>
 #include <string>
+#include <thread>
 
 class NetConnectInfo
 {
@@ -31,13 +34,20 @@ public:
 class VideoClient
 {
 public:
-    VideoClient() = default;
-    ~VideoClient() = default;
+    VideoClient();
+    ~VideoClient();
 
     void startSocketConnection(const NetConnectInfo &netConnectInfo);
 
 private:
+    void doRunWaitConnection();
+    void sendKeepAlivePacket();
+    static void clientExitSignalProcess(int num);
+    void closeSocketFD();
+
+private:
     int m_socketFD = -1;
+    static bool m_isThreadRunning;
 };
 
 #endif
