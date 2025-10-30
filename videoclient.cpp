@@ -4,7 +4,7 @@ bool VideoClient::m_isThreadRunning = true;
 
 VideoClient::VideoClient()
 {
-    signal(SIGINT, clientExitSignalProcess);
+    std::signal(SIGINT, clientExitSignalProcess);
 }
 
 VideoClient::~VideoClient()
@@ -136,4 +136,104 @@ void VideoClient::closeSocketFD()
         close(m_socketFD);
         m_socketFD = -1;
     }
+}
+
+bool VideoClient::receiveSocketData(std::vector<uint8_t> &buffer, size_t length)
+{
+    // 第一个信号表示向已关闭的socket写入数据，一般会异常终止进程
+    // 第二个信号表示忽略第一个信号，避免终止
+    std::signal(SIGPIPE, SIG_IGN);
+
+    std::lock_guard<std::mutex> lock(m_receiveMutex);
+
+    // 调整buffer大小以容纳指定长度的数据
+    buffer.resize(length);
+
+    // 已成功接收到的数据
+    size_t receiveLength = 0;
+    // 循环接收数据直到达到指定长度
+    while (receiveLength < length)
+    {
+        // 从socket接收数据，buffer.data() + receiveLength代表从已经接收到的数据的后面开始接收
+        // length - receiveLength表示总共需要的-已经接收的=剩下还需要多少=这次最大接收多少
+        // 最后一个参数代表，模式，0为默认值，代表阻塞模式等待数据到达，但因为之前设置了非阻塞模式，所以这里还是非阻塞
+        // 返回接收数据大小
+        size_t nRet = recv(m_socketFD, buffer.data() + receiveLength, length - receiveLength, 0);
+
+        // 异常处理
+        if (nRet < 0)
+        {
+            // 第一个和第三个表示socket无数据可读，第二个表示系统调用被中断
+            // 这三种情况都先短暂休眠
+            if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            // 其他错误直接返回false
+            std::cerr << "socket receive error" << std::endl;
+            return false;
+        }
+
+        // 对方连接关闭则直接返回false
+        if (nRet == 0)
+        {
+            std::cerr << "connection close, socket receive error" << std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool VideoClient::sendSocketData(const std::vector<uint8_t> &buffer, size_t length)
+{
+    // 忽略SIGPIPE信号，防止向已关闭的socket写入数据时程序异常终止
+    std::signal(SIGPIPE, SIG_IGN);
+
+    std::lock_guard<std::mutex> lock(m_sendMutex);
+
+    // 不需要调整buffer大小，因为是发送数据，buffer应该是已经准备好的数据
+    // buffer应该至少包含length字节的数据
+
+    // 已成功发送的数据
+    size_t sendLength = 0;
+    // 循环发送数据直到达到指定长度
+    while (sendLength < length)
+    {
+        // 从buffer中发送数据，buffer.data() + sendLength代表从未发送的数据开始发送
+        // length - sendLength表示总共需要发送的-已经发送的=剩下还需要发送多少
+        // 最后一个参数0为默认值，表示使用默认行为
+        // send函数返回实际发送的字节数
+        ssize_t nRet = send(m_socketFD, buffer.data() + sendLength, length - sendLength, 0);
+
+        // 异常处理
+        if (nRet < 0)
+        {
+            // 第一个和第三个表示socket无数据可读，第二个表示系统调用被中断
+            // 这三种情况都先短暂休眠
+            if (errno == EAGAIN || errno == EINTR || errno == EWOULDBLOCK)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            // 其他错误则直接返回false
+            std::cerr << "socket send error" << std::endl;
+            return false;
+        }
+
+        // 对方连接关闭则直接返回false
+        if (nRet == 0)
+        {
+            std::cerr << "connection close, socket send error" << std::endl;
+            return false;
+        }
+
+        // 累加已发送的数据长度
+        sendLength += nRet;
+    }
+
+    return true;
 }
