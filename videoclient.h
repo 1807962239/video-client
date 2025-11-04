@@ -10,28 +10,11 @@
 #include <cstring>
 
 #include <iostream>
-#include <string>
 #include <thread>
 #include <vector>
 #include <mutex>
 
-class NetConnectInfo
-{
-private:
-    std::string m_serverIP = "";
-    int m_port = 0;
-
-public:
-    NetConnectInfo() = default;
-    ~NetConnectInfo() = default;
-    NetConnectInfo(const std::string &ip, int port)
-        : m_serverIP(ip), m_port(port) {}
-    const std::string &getServerIp() const { return m_serverIP; }
-    int getPort() const { return m_port; }
-
-    void setServerIp(const std::string &ip) { m_serverIP = ip; }
-    void setPort(int port) { m_port = port; }
-};
+#include "type.h"
 
 class VideoClient
 {
@@ -54,6 +37,7 @@ private:
 private:
     int m_socketFD = -1;
     static bool m_isThreadRunning;
+    bool m_isConnected = false;
     std::mutex m_receiveMutex;
     std::mutex m_sendMutex;
 };

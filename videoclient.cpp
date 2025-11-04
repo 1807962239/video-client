@@ -26,10 +26,10 @@ void VideoClient::startSocketConnection(const NetConnectInfo &netConnectInfo)
     memset(&sockAddrIn, 0, sizeof(struct sockaddr_in));
 
     sockAddrIn.sin_family = AF_INET;
-    sockAddrIn.sin_port = htons(netConnectInfo.getPort());
+    sockAddrIn.sin_port = htons(netConnectInfo.m_port);
 
     // 将IPv4地址字符串转换为二进制地址缓冲区指针,存储在前面定义的协议的地址中
-    if (inet_pton(AF_INET, netConnectInfo.getServerIp().c_str(), &sockAddrIn.sin_addr.s_addr) < 0)
+    if (inet_pton(AF_INET, netConnectInfo.m_serverIP.c_str(), &sockAddrIn.sin_addr.s_addr) < 0)
     {
         std::cerr << "convert IPv4 address string to binary buffer pointer failed";
         return;
@@ -109,16 +109,38 @@ void VideoClient::doRunWaitConnection()
         return;
     }
 
+    m_isConnected = true;
     std::cout << "connect success" << std::endl;
 }
 
-// 发送心跳包，维持客户端运行
+// 发送心跳包，告诉服务端，此客户端还活着
+// 避免客户端非正常结束，服务端接收不到close信号
+// 检测不到心跳包就直接关闭和此客户端的连接
 void VideoClient::sendKeepAlivePacket()
 {
     while (m_isThreadRunning)
     {
         std::cout << "send alive packet..." << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        // 没连接上的时候先空转
+        if (!m_isConnected)
+        {
+            continue;
+        }
+
+        NetMessageHeader msgHeader("ALIVE", MSGHEADER_TYPE_KEEPALIVE, 0);
+
+        // 将要传入的对象转换为字节容器的形式
+        std::vector<uint8_t> buffer;
+        buffer.resize(sizeof(NetMessageHeader));
+        memcpy(buffer.data(), &msgHeader, sizeof(NetMessageHeader));
+
+        // 发送数据
+        if (!sendSocketData(buffer, sizeof(NetMessageHeader)))
+        {
+            std::cerr << "failed to send message header" << std::endl;
+        }
     }
 
     std::cout << "stop send alive packet" << std::endl;
@@ -158,7 +180,7 @@ bool VideoClient::receiveSocketData(std::vector<uint8_t> &buffer, size_t length)
         // length - receiveLength表示总共需要的-已经接收的=剩下还需要多少=这次最大接收多少
         // 最后一个参数代表，模式，0为默认值，代表阻塞模式等待数据到达，但因为之前设置了非阻塞模式，所以这里还是非阻塞
         // 返回接收数据大小
-        size_t nRet = recv(m_socketFD, buffer.data() + receiveLength, length - receiveLength, 0);
+        int nRet = recv(m_socketFD, buffer.data() + receiveLength, length - receiveLength, 0);
 
         // 异常处理
         if (nRet < 0)
@@ -182,6 +204,8 @@ bool VideoClient::receiveSocketData(std::vector<uint8_t> &buffer, size_t length)
             std::cerr << "connection close, socket receive error" << std::endl;
             return false;
         }
+
+        receiveLength += nRet;
     }
 
     return true;
@@ -206,7 +230,7 @@ bool VideoClient::sendSocketData(const std::vector<uint8_t> &buffer, size_t leng
         // length - sendLength表示总共需要发送的-已经发送的=剩下还需要发送多少
         // 最后一个参数0为默认值，表示使用默认行为
         // send函数返回实际发送的字节数
-        ssize_t nRet = send(m_socketFD, buffer.data() + sendLength, length - sendLength, 0);
+        int nRet = send(m_socketFD, buffer.data() + sendLength, length - sendLength, 0);
 
         // 异常处理
         if (nRet < 0)
