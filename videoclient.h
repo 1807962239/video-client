@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 #include <mutex>
+#include <atomic>
 
 #include "type.h"
 
@@ -26,6 +27,7 @@ public:
 
 private:
     void doRunWaitConnection();
+    void doReceiveData();
     void sendKeepAlivePacket();
     static void clientExitSignalProcess(int num);
     void closeSocketFD();
@@ -36,7 +38,7 @@ private:
 
 private:
     int m_socketFD = -1;
-    static bool m_isThreadRunning;
+    static std::atomic_bool m_isThreadRunning;
     bool m_isConnected = false;
     std::mutex m_receiveMutex;
     std::mutex m_sendMutex;

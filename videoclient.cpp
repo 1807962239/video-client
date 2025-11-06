@@ -1,6 +1,6 @@
 #include "videoclient.h"
 
-bool VideoClient::m_isThreadRunning = true;
+std::atomic_bool VideoClient::m_isThreadRunning = true;
 
 VideoClient::VideoClient()
 {
@@ -46,6 +46,11 @@ void VideoClient::startSocketConnection(const NetConnectInfo &netConnectInfo)
     std::thread runWaitConnectionThread([this]()
                                         { this->doRunWaitConnection(); });
     runWaitConnectionThread.detach();
+
+    // 再用一个线程接收服务端发来的实际的数据包
+    std::thread receiveDataThread([this]()
+                                  { this->doReceiveData(); });
+    receiveDataThread.detach();
 
     // 发送心跳包，保持客户端运行，避免主线程直接运行完终止来不及执行子线程
     sendKeepAlivePacket();
@@ -113,6 +118,52 @@ void VideoClient::doRunWaitConnection()
     std::cout << "connect success" << std::endl;
 }
 
+void VideoClient::doReceiveData()
+{
+    while (m_isThreadRunning)
+    {
+        // 1s收取1次
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (!m_isConnected)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        std::vector<u_int8_t> buffer(sizeof(NetMessageHeader));
+        if (!receiveSocketData(buffer, sizeof(NetMessageHeader)))
+        {
+            std::cerr << "failed to receive message header" << std::endl;
+            continue;
+        }
+
+        // 将接收到的数据转为需要的信息头结构体
+        NetMessageHeader msgHeader;
+        memcpy(&msgHeader, buffer.data(), sizeof(NetMessageHeader));
+
+        // 匹配消息头
+        if (strncmp(msgHeader.m_headerID, "ALIVE", 5) != 0 || msgHeader.m_msgType != MSGHEADER_TYPE_STREAM || msgHeader.m_subType != MSGHEADER_STREAM_VIDEO)
+        {
+            continue;
+        }
+        // 消息头匹配成功再处理流媒体包
+
+        // 根据传过来的消息头中记录的数据的大小设置空间
+        std::vector<uint8_t> streamBuffer(msgHeader.m_length);
+        receiveSocketData(streamBuffer, msgHeader.m_length);
+
+        // 以下来测试收取到的数据
+        std::cout << "收取到的视频数据大小：" << msgHeader.m_length << std::endl;
+        // 打印数据的前十位
+        std::cout << "数据前十位：";
+        for (int i = 0; i < 10; i++)
+        {
+            std::cout << streamBuffer[i] << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
 // 发送心跳包，告诉服务端，此客户端还活着
 // 避免客户端非正常结束，服务端接收不到close信号
 // 检测不到心跳包就直接关闭和此客户端的连接
@@ -129,7 +180,8 @@ void VideoClient::sendKeepAlivePacket()
             continue;
         }
 
-        NetMessageHeader msgHeader("ALIVE", MSGHEADER_TYPE_KEEPALIVE, 0);
+        // 这里心跳包后两个参数都是不用的
+        NetMessageHeader msgHeader("ALIVE", MSGHEADER_TYPE_KEEPALIVE, 0, 0);
 
         // 将要传入的对象转换为字节容器的形式
         std::vector<uint8_t> buffer;
