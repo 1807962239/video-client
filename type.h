@@ -2,6 +2,8 @@
 #define TYPE_H
 
 #include <string>
+#include <cstring>
+#include <cstdint>
 
 // 这两个用来判断数据是心跳包还是流媒体
 #define MSGHEADER_TYPE_KEEPALIVE 0
@@ -41,7 +43,7 @@ struct NetMessageHeader
     NetMessageHeader(const char *headerID, uint16_t msgType, uint16_t subType, size_t length)
         : m_msgType(msgType), m_subType(subType), m_length(length)
     {
-        strncpy(m_headerID, headerID, sizeof(m_headerID) - 1);
+        std::strncpy(m_headerID, headerID, sizeof(m_headerID) - 1);
         m_headerID[sizeof(m_headerID) - 1] = '\0';
     }
 };

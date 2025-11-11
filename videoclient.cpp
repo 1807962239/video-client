@@ -1,15 +1,12 @@
 #include "videoclient.h"
 
-std::atomic_bool VideoClient::m_isThreadRunning = true;
-
 VideoClient::VideoClient()
 {
-    std::signal(SIGINT, clientExitSignalProcess);
 }
 
 VideoClient::~VideoClient()
 {
-    closeSocketFD();
+    stopSocketConnection();
 }
 
 void VideoClient::startSocketConnection(const NetConnectInfo &netConnectInfo)
@@ -52,8 +49,29 @@ void VideoClient::startSocketConnection(const NetConnectInfo &netConnectInfo)
                                   { this->doReceiveData(); });
     receiveDataThread.detach();
 
-    // 发送心跳包，保持客户端运行，避免主线程直接运行完终止来不及执行子线程
-    sendKeepAlivePacket();
+    // 发送心跳包，提醒服务端，此客户端的存活状态
+    // 这是另一种更简单的写法，传入成员函数和对象指针
+    std::thread sendAlivePacketThread(&VideoClient::sendKeepAlivePacket, this);
+    sendAlivePacketThread.detach();
+}
+
+void VideoClient::stopSocketConnection()
+{
+    m_isThreadRunning = false;
+    if (m_socketFD >= 0)
+    {
+        close(m_socketFD);
+        m_socketFD = -1;
+    }
+
+    // 析构时可阻塞等待线程执行完再退出
+    while (m_isKeepAliveThreadRunning) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    while (m_isReceiveThreadRunning) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 void VideoClient::doRunWaitConnection()
@@ -122,6 +140,7 @@ void VideoClient::doReceiveData()
 {
     while (m_isThreadRunning)
     {
+        m_isReceiveThreadRunning = true;
         // 1s收取1次
         std::this_thread::sleep_for(std::chrono::seconds(1));
         if (!m_isConnected)
@@ -162,6 +181,8 @@ void VideoClient::doReceiveData()
         }
         std::cout << std::endl;
     }
+    m_isReceiveThreadRunning = false;
+    std::cout << "stop receive packet from server" << std::endl;
 }
 
 // 发送心跳包，告诉服务端，此客户端还活着
@@ -171,6 +192,7 @@ void VideoClient::sendKeepAlivePacket()
 {
     while (m_isThreadRunning)
     {
+        m_isKeepAliveThreadRunning = true;
         std::cout << "send alive packet..." << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -194,22 +216,9 @@ void VideoClient::sendKeepAlivePacket()
             std::cerr << "failed to send message header" << std::endl;
         }
     }
+    m_isKeepAliveThreadRunning = false;
 
     std::cout << "stop send alive packet" << std::endl;
-}
-
-void VideoClient::clientExitSignalProcess(int num)
-{
-    m_isThreadRunning = false;
-}
-
-void VideoClient::closeSocketFD()
-{
-    if (m_socketFD >= 0)
-    {
-        close(m_socketFD);
-        m_socketFD = -1;
-    }
 }
 
 bool VideoClient::receiveSocketData(std::vector<uint8_t> &buffer, size_t length)

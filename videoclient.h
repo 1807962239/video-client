@@ -24,13 +24,12 @@ public:
     ~VideoClient();
 
     void startSocketConnection(const NetConnectInfo &netConnectInfo);
+    void stopSocketConnection();
 
 private:
     void doRunWaitConnection();
     void doReceiveData();
     void sendKeepAlivePacket();
-    static void clientExitSignalProcess(int num);
-    void closeSocketFD();
 
     // 数据收发函数
     bool receiveSocketData(std::vector<uint8_t> &buffer, size_t length);
@@ -38,7 +37,12 @@ private:
 
 private:
     int m_socketFD = -1;
-    static std::atomic_bool m_isThreadRunning;
+
+    std::atomic_bool m_isThreadRunning = true;
+    // 用两个标志来使线程优雅的退出
+    std::atomic_bool m_isKeepAliveThreadRunning = false;
+    std::atomic_bool m_isReceiveThreadRunning = false;
+
     bool m_isConnected = false;
     std::mutex m_receiveMutex;
     std::mutex m_sendMutex;
