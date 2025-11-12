@@ -10,6 +10,14 @@ MainWindow::MainWindow(QWidget *parent)
     NetConnectInfo netConnectInfo("192.168.18.5", 30000);
 
     m_pVideoClient->startSocketConnection(netConnectInfo);
+
+    auto updateVideoCallbackFunction = [this] (YUVFrameData *yuvFrameData) {
+        if (yuvFrameData == nullptr) {
+            return;
+        }
+        std::cout << "测试解码后的回调数据" << std::endl;
+    };
+    m_pVideoClient->setupUpdateVideoCallback(updateVideoCallbackFunction);
 }
 
 MainWindow::~MainWindow()

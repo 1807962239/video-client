@@ -14,8 +14,12 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <functional>
 
 #include "type.h"
+#include "h264decoder.h"
+
+using updateVideoCallback = std::function<void(YUVFrameData *yuvFrameData)>;
 
 class VideoClient
 {
@@ -25,6 +29,8 @@ public:
 
     void startSocketConnection(const NetConnectInfo &netConnectInfo);
     void stopSocketConnection();
+
+    void setupUpdateVideoCallback(updateVideoCallback &&callback);
 
 private:
     void doRunWaitConnection();
@@ -46,6 +52,8 @@ private:
     bool m_isConnected = false;
     std::mutex m_receiveMutex;
     std::mutex m_sendMutex;
+
+    updateVideoCallback m_updateVideoCallback;
 };
 
 #endif

@@ -4,6 +4,7 @@
 #include <string>
 #include <cstring>
 #include <cstdint>
+#include <vector>
 
 // 这两个用来判断数据是心跳包还是流媒体
 #define MSGHEADER_TYPE_KEEPALIVE 0
@@ -46,6 +47,22 @@ struct NetMessageHeader
         std::strncpy(m_headerID, headerID, sizeof(m_headerID) - 1);
         m_headerID[sizeof(m_headerID) - 1] = '\0';
     }
+};
+
+struct YUVChannel
+{
+    size_t m_length;
+    std::vector<uint8_t> m_dataBuffer;
+};
+
+struct YUVFrameData
+{
+    int m_width;
+    int m_height;
+    YUVChannel m_luma;
+    YUVChannel m_chromaB;
+    YUVChannel m_chromaR;
+    long long pts;
 };
 
 #pragma pack(pop)

@@ -65,13 +65,20 @@ void VideoClient::stopSocketConnection()
     }
 
     // 析构时可阻塞等待线程执行完再退出
-    while (m_isKeepAliveThreadRunning) {
+    while (m_isKeepAliveThreadRunning)
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    while (m_isReceiveThreadRunning) {
+    while (m_isReceiveThreadRunning)
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+}
+
+void VideoClient::setupUpdateVideoCallback(updateVideoCallback &&callback)
+{
+    m_updateVideoCallback = callback;
 }
 
 void VideoClient::doRunWaitConnection()
@@ -138,11 +145,13 @@ void VideoClient::doRunWaitConnection()
 
 void VideoClient::doReceiveData()
 {
+    H264Decoder decoder;
     while (m_isThreadRunning)
     {
         m_isReceiveThreadRunning = true;
-        // 1s收取1次
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // 10ms收取1次，这里不能接收太慢，如果频率太慢会导致大量socket数据丢弃，接收到的数据就是不连续的
+        // 会导致解码不出来
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         if (!m_isConnected)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -171,15 +180,13 @@ void VideoClient::doReceiveData()
         std::vector<uint8_t> streamBuffer(msgHeader.m_length);
         receiveSocketData(streamBuffer, msgHeader.m_length);
 
-        // 以下来测试收取到的数据
-        std::cout << "收取到的视频数据大小：" << msgHeader.m_length << std::endl;
-        // 打印数据的前十位
-        std::cout << "数据前十位：";
-        for (int i = 0; i < 10; i++)
+        YUVFrameData yuvFrameData;
+        int ret = decoder.decodeH264Packet(std::move(streamBuffer), msgHeader.m_length, &yuvFrameData);
+        if (ret != 0)
         {
-            std::cout << streamBuffer[i] << " ";
+            continue;
         }
-        std::cout << std::endl;
+        m_updateVideoCallback(&yuvFrameData);
     }
     m_isReceiveThreadRunning = false;
     std::cout << "stop receive packet from server" << std::endl;
