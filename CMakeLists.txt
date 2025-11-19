@@ -6,13 +6,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Core OpenGLWidgets)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(AVCODEC REQUIRED libavcodec)
-pkg_check_modules(AVFORMAT REQUIRED libavformat)
-pkg_check_modules(AVUTIL REQUIRED libavutil)
+if(WIN32)
+    set(THIRD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/win32)
+    set(FFMPEG_DIR ${THIRD_DIR}/ffmpeg)
+    set(GLEW_DIR ${THIRD_DIR}/glew)
+
+    set(INCLUDE_DIR ${THIRD_DIR}/include)
+
+    add_definitions(-DPLATFORM_WINDOWS)
+
+elseif(UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(AVCODEC REQUIRED libavcodec)
+    pkg_check_modules(AVFORMAT REQUIRED libavformat)
+    pkg_check_modules(AVUTIL REQUIRED libavutil)
+    find_package(GLEW REQUIRED)
+
+    add_definitions(-DPLATFORM_LINUX)
+endif()
 
 find_package(OpenGL REQUIRED)
-find_package(GLEW REQUIRED)
 
 qt_standard_project_setup()
 set(CMAKE_AUTORCC ON)
@@ -39,10 +52,23 @@ add_executable(video-client ${CPP_SOURCES} ${CPP_HEADERS}
 
 target_link_libraries(video-client PRIVATE Qt6::Core Qt6::Widgets Qt6::OpenGLWidgets)
 
-target_link_libraries(video-client PRIVATE
-    ${AVCODEC_LIBRARIES}
-    ${AVFORMAT_LIBRARIES}
-    ${AVUTIL_LIBRARIES}
-)
+if(WIN32)
+    target_link_libraries(video-client PRIVATE
+        ${FFMPEG_DIR}/lib/libavcodec.dll.a
+        ${FFMPEG_DIR}/lib/libavformat.dll.a
+        ${FFMPEG_DIR}/lib/libavutil.dll.a
+        ${GLEW_DIR}/lib/libglew32.dll.a
+    )
+    target_link_libraries(video-client PRIVATE OpenGL::GL)
+    target_link_libraries(video-client PRIVATE ws2_32)
 
-target_link_libraries(video-client PRIVATE OpenGL::GL GLEW::GLEW)
+    target_include_directories(video-client PRIVATE ${INCLUDE_DIR})
+elseif(UNIX AND NOT APPLE)
+    target_link_libraries(video-client PRIVATE
+        ${AVCODEC_LIBRARIES}
+        ${AVFORMAT_LIBRARIES}
+        ${AVUTIL_LIBRARIES}
+    )
+
+    target_link_libraries(video-client PRIVATE OpenGL::GL GLEW::GLEW)
+endif()

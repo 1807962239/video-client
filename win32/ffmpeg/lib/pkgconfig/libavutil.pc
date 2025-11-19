@@ -1,0 +1,14 @@
+prefix=/home/xiaomi/ffmpeg-7.1.1/output
+exec_prefix=${prefix}
+libdir=/home/xiaomi/ffmpeg-7.1.1/output/lib
+includedir=/home/xiaomi/ffmpeg-7.1.1/output/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 59.39.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -lva_win32 -lva -lm -luser32 -lva -lbcrypt -latomic
+Libs.private: 
+Cflags: -I${includedir}
