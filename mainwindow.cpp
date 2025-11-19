@@ -7,7 +7,7 @@ MainWindow::MainWindow(QWidget *parent)
     this->setFixedSize(640, 480);
     // 这里设置的地址必须是服务端可用的IP地址,这样才能访问到特定主机的服务端
     // 通过ip addr show在服务端主机上查看其可用IP
-    NetConnectInfo netConnectInfo("192.168.18.5", 30000);
+    NetConnectInfo netConnectInfo("192.168.18.3", 30000);
 
     m_pVideoClient->startSocketConnection(netConnectInfo);
 
@@ -15,9 +15,12 @@ MainWindow::MainWindow(QWidget *parent)
         if (yuvFrameData == nullptr) {
             return;
         }
-        std::cout << "测试解码后的回调数据" << std::endl;
+        m_pOpenGLWidget->RendVideo(yuvFrameData);
     };
     m_pVideoClient->setupUpdateVideoCallback(updateVideoCallbackFunction);
+
+    m_pOpenGLWidget = new OpenGLWidget(this);
+    this->setCentralWidget(m_pOpenGLWidget);
 }
 
 MainWindow::~MainWindow()

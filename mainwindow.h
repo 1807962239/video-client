@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "videoclient.h"
+#include "openglwidget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -15,6 +16,7 @@ public:
 
 private:
     std::unique_ptr<VideoClient> m_pVideoClient;
+    OpenGLWidget *m_pOpenGLWidget = nullptr;
 
 signals:
 };
