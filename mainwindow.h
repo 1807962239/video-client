@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <memory>
+#include <fstream>
 
 #include "videoclient.h"
 #include "openglwidget.h"
@@ -13,6 +14,9 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
+private:
+    bool loadNetConfig(NetConnectInfo &info);
 
 private:
     std::unique_ptr<VideoClient> m_pVideoClient;

@@ -100,83 +100,124 @@ void VideoClient::setupUpdateVideoCallback(updateVideoCallback &&callback)
 
 void VideoClient::doRunWaitConnection()
 {
-    // 文件描述符集合类型
-    // 分别创建读集合和写集合监听套接字的可读和可写状态
-    fd_set rSet, wSet;
+    std::cout << ">>> Connection monitoring thread started <<<" << std::endl;
+    int attemptCount = 0;
+    const int maxAttempts = 10;
 
-    // 清空集合
-    FD_ZERO(&rSet);
-    FD_ZERO(&wSet);
+    while (m_isThreadRunning && !m_isConnected && attemptCount < maxAttempts)
+    {
+        attemptCount++;
+        std::cout << "--- Connection attempt " << attemptCount << " ---" << std::endl;
 
-    // 设置超时时间为10秒+0微秒
-    struct timeval timeout = {1000, 0};
+        // 文件描述符集合类型
+
+        // 分别创建读集合和写集合监听套接字的可读和可写状态
+        fd_set rSet, wSet;
+
+        // 清空集合
+        FD_ZERO(&rSet);
+        FD_ZERO(&wSet);
+
+        // 设置超时时间为10秒+0微秒
+        struct timeval timeout = {10, 0};
 #ifdef _WIN32
-    SOCKET winSocket = static_cast<SOCKET>(m_socketFD);
-    FD_SET(winSocket, &rSet);
-    FD_SET(winSocket, &wSet);
-    int retValue = select(0, &rSet, &wSet, nullptr, &timeout);
-#else
-    // 将描述符放到集合中
-    FD_SET(m_socketFD, &rSet);
-    FD_SET(m_socketFD, &wSet);
+        SOCKET winSocket = static_cast<SOCKET>(m_socketFD);
+        if (winSocket == INVALID_SOCKET) {
+            std::cerr << "Invalid socket in monitoring thread!" << std::endl;
+            break;
+        }
+        FD_SET(winSocket, &rSet);
+        FD_SET(winSocket, &wSet);
 
-    // 调用select函数等待套接字变成可读或可写状态
-    // 第一个参数传入集合中的最大描述符+1,表示select需要检查范围的上限
-    // 后面分别传入读集合和写集合来监听
-    // 第四个参数传入nullptr表示不监视异常情况
-    // 最后一个参数表示超时时间
-    int retValue = select(m_socketFD + 1, &rSet, &wSet, nullptr, &timeout);
+        std::cout << "Calling select() on Windows..." << std::endl;
+        int retValue = select(0, &rSet, &wSet, nullptr, &timeout);
+        std::cout << "Windows select returned: " << retValue;
+        if (retValue == SOCKET_ERROR) {
+            int winError = WSAGetLastError();
+            std::cout << " (SOCKET_ERROR: " << winError << ")" << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            continue;
+        }
+#else
+        // 将描述符放到集合中
+        FD_SET(m_socketFD, &rSet);
+        FD_SET(m_socketFD, &wSet);
+
+        // 调用select函数等待套接字变成可读或可写状态
+        // 第一个参数传入集合中的最大描述符+1,表示select需要检查范围的上限
+        // 后面分别传入读集合和写集合来监听
+        // 第四个参数传入nullptr表示不监视异常情况
+        // 最后一个参数表示超时时间
+        int retValue = select(m_socketFD + 1, &rSet, &wSet, nullptr, &timeout);
+        std::cout << "Linux select returned: " << retValue;
+        if (retValue == -1) {
+            std::cout << " (ERROR: " << strerror(errno) << ")" << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            continue;
+        }
+#endif
+        else if (retValue == 0) {
+            std::cout << " (TIMEOUT)" << std::endl;
+            continue;
+        } else {
+            std::cout << " (SUCCESS - socket is ready)" << std::endl;
+        }
+
+        // 检查套接字错误状态
+        int socketError = 0;
+        socklen_t len = sizeof(socketError);
+
+#ifdef _WIN32
+        std::cout << "Checking socket error status on Windows..." << std::endl;
+        if (getsockopt(winSocket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socketError), &len) == SOCKET_ERROR) {
+            std::cerr << "getsockopt failed, Windows error: " << WSAGetLastError() << std::endl;
+            continue;
+        }
+#else
+        std::cout << "Checking socket error status on Linux..." << std::endl;
+        if (getsockopt(m_socketFD, SOL_SOCKET, SO_ERROR, &socketError, &len) < 0) {
+            std::cerr << "getsockopt failed, error: " << strerror(errno) << std::endl;
+            continue;
+        }
+#endif
+        std::cout << "Socket error code: " << socketError << " (" << strerror(socketError) << ")" << std::endl;
+        if (socketError != 0) {
+            std::cerr << "Socket has error: " << strerror(socketError) << std::endl;
+            continue;
+        }
+
+// 检查是否可写（连接成功的关键标志）
+#ifdef _WIN32
+        bool isWritable = FD_ISSET(winSocket, &wSet);
+        std::cout << "Socket writable check: " << (isWritable ? "YES" : "NO") << std::endl;
+
+        if (isWritable) {
+            m_isConnected = true;
+            std::cout << "=== CONNECTION ESTABLISHED SUCCESSFULLY! ===" << std::endl;
+            break;
+        }
+#else
+        bool isWritable = FD_ISSET(m_socketFD, &wSet);
+        std::cout << "Socket writable check: " << (isWritable ? "YES" : "NO") << std::endl;
+
+        if (isWritable) {
+            m_isConnected = true;
+            std::cout << "=== CONNECTION ESTABLISHED SUCCESSFULLY! ===" << std::endl;
+            break;
+        }
 #endif
 
-#ifdef _WIN32
-    if (retValue == SOCKET_ERROR)
-    {
-        std::cerr << "select failed, error: " << WSAGetLastError() << std::endl;
-#else
-    if (retValue == -1)
-    {
-        // 错误
-        std::cerr << "select called failed" << std::endl;
-#endif
-        return;
-    }
-    else if (retValue == 0)
-    {
-        // 超时
-        std::cerr << "select is time out" << std::endl;
-        return;
+        std::cout << "--- Connection attempt " << attemptCount << " failed ---" << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 
-#ifdef _WIN32
-    if (!FD_ISSET(winSocket, &wSet)) {
-#else
-    // 检查套接字是否在写集合中(连接完成的关键标志,不在直接return)
-    if (!FD_ISSET(m_socketFD, &wSet)) {
-#endif
-        std::cerr << "no write set" << std::endl;
-        return;
+    if (!m_isConnected) {
+        std::cerr << "=== FINAL: CONNECTION FAILED after " << attemptCount << " attempts ===" << std::endl;
+    } else {
+        std::cout << "=== FINAL: CONNECTION SUCCESS ===" << std::endl;
     }
 
-    // 获取套接字错误状态去进一步判断
-    int error = 0;
-    socklen_t len = sizeof(error);
-#ifdef _WIN32
-    if (getsockopt(winSocket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &len) == SOCKET_ERROR) {
-        std::cerr << "getsockopt failed, error: " << WSAGetLastError() << std::endl;
-#else
-    if (getsockopt(m_socketFD, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
-        std::cerr << "getsockopt failed" << std::endl;
-#endif
-        return;
-    }
-    if (error != 0)
-    {
-        std::cerr << "connect failed: " << strerror(error) << std::endl;
-        return;
-    }
-
-    m_isConnected = true;
-    std::cout << "connect success" << std::endl;
+    std::cout << ">>> Connection monitoring thread finished <<<" << std::endl;
 }
 
 void VideoClient::doReceiveData()
