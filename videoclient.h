@@ -1,14 +1,15 @@
 #ifndef VIDEOCLIENT_H
 #define VIDEOCLIENT_H
 
-#ifdef PLATFORM_LINUX
+#ifdef _WIN32
+#include <winsock2.h> // windows的socket库
+#include <ws2tcpip.h> // windows的网络tcp库
+#elif defined(__linux__)
 #include <sys/socket.h>
+#include <unistd.h>
 #include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h> // 包含IPv4和IPv6地址的文本表示与二进制格式之间的转换的函数
-#elif PLATFORM_WINDOWS
-#include <winsock2.h> // windows的socket库
-#include <ws2tcpip.h> // windows的网络tcp库
 #endif
 
 #include <fcntl.h>
@@ -17,7 +18,6 @@
 #include <iostream>
 #include <thread>
 #include <vector>
-#include <mutex>
 #include <atomic>
 #include <functional>
 
@@ -47,7 +47,11 @@ private:
     bool sendSocketData(const std::vector<uint8_t> &buffer, size_t length);
 
 private:
+#ifdef _WIN32
+    SOCKET m_socketFD = INVALID_SOCKET;
+#elif defined(__linux__)
     int m_socketFD = -1;
+#endif
 
     std::atomic_bool m_isThreadRunning = true;
     // 用两个标志来使线程优雅的退出
@@ -55,8 +59,6 @@ private:
     std::atomic_bool m_isReceiveThreadRunning = false;
 
     bool m_isConnected = false;
-    std::mutex m_receiveMutex;
-    std::mutex m_sendMutex;
 
     updateVideoCallback m_updateVideoCallback;
 };
