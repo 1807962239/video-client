@@ -23,6 +23,7 @@
 
 #include "type.h"
 #include "h264decoder.h"
+#include "videowriter.h"
 
 using updateVideoCallback = std::function<void(YUVFrameData *yuvFrameData)>;
 

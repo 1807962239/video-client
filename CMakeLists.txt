@@ -26,7 +26,8 @@ set(THIRD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/win32)
 if(WIN32)
     set(FFMPEG_LIBS ${THIRD_DIR}/ffmpeg/lib/libavcodec.dll.a
                     ${THIRD_DIR}/ffmpeg/lib/libavformat.dll.a
-                    ${THIRD_DIR}/ffmpeg/lib/libavutil.dll.a)
+                    ${THIRD_DIR}/ffmpeg/lib/libavutil.dll.a
+                    ${THIRD_DIR}/ffmpeg/lib/libavdevice.dll.a)
     set(GLEW_LIBS ${THIRD_DIR}/glew/lib/libglew32.dll.a)
     set(SYSTEM_LIBS ws2_32)
 

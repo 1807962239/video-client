@@ -119,6 +119,8 @@ void VideoClient::stopSocketConnection()
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+
+    VideoWriter::getInstance().stop();
 }
 
 void VideoClient::setupUpdateVideoCallback(updateVideoCallback &&callback)
@@ -193,6 +195,7 @@ void VideoClient::doRunWaitConnection()
             {
                 std::cout << "socket connected successfully" << std::endl;
                 m_isConnected = true;
+                VideoWriter::getInstance().start("output.mov"); // 开始写入视频文件，可以根据实际情况修改
                 break;
             }
             else
@@ -243,6 +246,8 @@ void VideoClient::doReceiveData()
         // 根据传过来的消息头中记录的数据的大小设置空间
         std::vector<uint8_t> streamBuffer(msgHeader.m_length);
         receiveSocketData(streamBuffer, msgHeader.m_length);
+        VideoWriter::getInstance().setVideoSize(640, 480);
+        VideoWriter::getInstance().writeVideoData(streamBuffer, msgHeader.m_length);
 
         YUVFrameData yuvFrameData;
         int ret = decoder.decodeH264Packet(std::move(streamBuffer), msgHeader.m_length, &yuvFrameData);
