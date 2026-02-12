@@ -1,2 +1,2 @@
-server_ip=0.tcp.jp.ngrok.io
-server_port=15989
+server_ip=10.177.45.126
+server_port=30000

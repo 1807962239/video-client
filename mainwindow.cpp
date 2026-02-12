@@ -4,7 +4,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow{parent},
       m_pVideoClient(std::make_unique<VideoClient>())
 {
-    this->setFixedSize(640, 480);
+    this->setFixedSize(640, 480 + 50); // 视频窗口大小为640x480，控制按钮区域高度为50
     // 这里设置的地址必须是服务端可用的IP地址,这样才能访问到特定主机的服务端
     // 通过ip addr show在服务端主机上查看其可用IP
     NetConnectInfo netConnectInfo;
@@ -26,13 +26,33 @@ MainWindow::MainWindow(QWidget *parent)
     };
     m_pVideoClient->setupUpdateVideoCallback(updateVideoCallbackFunction);
 
-    m_pOpenGLWidget = new OpenGLWidget(this);
-    this->setCentralWidget(m_pOpenGLWidget);
+    initUi();
+    connect(m_pRecordButton, &QPushButton::clicked, []()
+            { VideoWriter::getInstance().toggleRecord(); });
 }
 
 MainWindow::~MainWindow()
 {
     m_pVideoClient->stopSocketConnection();
+}
+
+void MainWindow::initUi()
+{
+    QWidget *centralWidget = new QWidget(this);
+    this->setCentralWidget(centralWidget);
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+
+    m_pOpenGLWidget = new OpenGLWidget(centralWidget);
+    QWidget *controlWidget = new QWidget(centralWidget);
+    mainLayout->addWidget(m_pOpenGLWidget);
+    mainLayout->addWidget(controlWidget);
+
+    QHBoxLayout *controlLayout = new QHBoxLayout(controlWidget);
+    controlWidget->setFixedHeight(50); // 设置控制按钮区域的高度为50
+    m_pRecordButton = new QPushButton("Record", controlWidget);
+    controlLayout->addItem(new QSpacerItem(40, 50, QSizePolicy::Expanding, QSizePolicy::Minimum));
+    controlLayout->addWidget(m_pRecordButton);
+    controlLayout->addItem(new QSpacerItem(40, 50, QSizePolicy::Expanding, QSizePolicy::Minimum));
 }
 
 bool MainWindow::loadNetConfig(NetConnectInfo &info)

@@ -52,6 +52,7 @@ set(CPP_SOURCES
     mainwindow.cpp
     h264decoder.cpp
     openglwidget.cpp
+    videowriter.cpp
 )
 
 set(CPP_HEADERS
@@ -60,6 +61,7 @@ set(CPP_HEADERS
     mainwindow.h
     h264decoder.h
     openglwidget.h
+    videowriter.h
 )
 
 add_executable(video-client ${CPP_SOURCES} ${CPP_HEADERS})

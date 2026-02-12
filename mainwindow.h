@@ -2,6 +2,8 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <memory>
 #include <fstream>
 
@@ -17,10 +19,12 @@ public:
 
 private:
     bool loadNetConfig(NetConnectInfo &info);
+    void initUi();
 
 private:
     std::unique_ptr<VideoClient> m_pVideoClient;
     OpenGLWidget *m_pOpenGLWidget = nullptr;
+    QPushButton *m_pRecordButton = nullptr;
 
 signals:
 };

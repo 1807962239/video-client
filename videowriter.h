@@ -14,8 +14,8 @@ extern "C"
 {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
-// #include <libavdevice/avdevice.h>
 #include <libavutil/avutil.h>
+#include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
 #include <libavutil/imgutils.h>
 }
@@ -32,14 +32,6 @@ struct AvccBox
     std::array<uint8_t, 64> ppsBuffer{};  // PPS数据缓存
 };
 
-// H.264 NALU单元结构体
-struct H264Nalu
-{
-    H264NalType type = Nal;    // NALU类型
-    size_t size = 0;           // 数据长度（字节）
-    std::vector<uint8_t> data; // 数据
-};
-
 // H.264 NAL单元类型枚举
 enum H264NalType
 {
@@ -54,11 +46,18 @@ enum H264NalType
     Pps = 8       // PPS参数帧
 };
 
+// H.264 NALU单元结构体
+struct H264Nalu
+{
+    H264NalType type = Nal;    // NALU类型
+    size_t size = 0;           // 数据长度（字节）
+    std::vector<uint8_t> data; // 数据
+};
+
 // 视频帧数据结构体
 struct VideoFrame
 {
     int codecId = 0;                                    // 编码器ID（如AV_CODEC_ID_H264）
-    uint64_t timeStamp = 0;                             // 时间戳（毫秒）
     size_t size = 0;                                    // 数据长度（字节）
     std::array<uint8_t, AV_MAX_VIDEO_DATA_SIZE> data{}; // 视频数据缓存
 };
@@ -67,18 +66,8 @@ struct VideoFrame
 struct AudioFrame
 {
     int codecId = 0;                                    // 编码器ID（如AV_CODEC_ID_AAC）
-    uint64_t timeStamp = 0;                             // 时间戳（毫秒）
     size_t size = 0;                                    // 数据长度（字节）
     std::array<uint8_t, AV_MAX_AUDIO_DATA_SIZE> data{}; // 音频数据缓存
-};
-
-// 写入流的帧时间戳状态（用于PTS/DTS计算）
-struct StreamWriteState
-{
-    int currentPts = 0;              // 当前帧的PTS（容器时间基单位）
-    double currentTimeSec = 0.0;     // 当前帧的显示时间（秒）
-    uint64_t totalElapsedMs = 0;     // 累计写入时长（毫秒）
-    uint64_t lastInputTimestamp = 0; // 上一帧输入的原始时间戳（毫秒）
 };
 
 class VideoWriter
@@ -89,7 +78,11 @@ public:
     // 控制接口
     void start(const std::string &filePath);
     void stop();
-    void setVideoSize(int width, int height);
+    void toggleRecord();
+    bool getStatus() const
+    {
+        return m_recordStatus;
+    }
     void writeVideoData(std::vector<uint8_t> buffer, size_t length);
     void writeAudioData(std::vector<uint8_t> buffer, size_t length);
 
@@ -97,9 +90,11 @@ private:
     VideoWriter();
     ~VideoWriter();
 
+    void setVideoSize(int width, int height);
+
     // FFmpeg相关
     void initVideoWriter();
-    void resetAvDataInfo();
+    void resetAvDataInfo(bool keepCodecConfig = false);
     void writeVideoHeader();
     void initVideoStreamInfo();
     void initAudioStreamInfo();
@@ -113,9 +108,6 @@ private:
     // AudioSpecificConfig相关
     void getIndexConfigure(unsigned int sample, unsigned int channels, std::array<uint8_t, 2> &indexBuff);
     int getSampleIndex(unsigned int sample);
-
-    // 时间戳辅助函数
-    uint64_t elapseMs() const;
 
 private:
     // 编解码器相关
@@ -131,17 +123,15 @@ private:
     int m_videoHeight = 0;
     std::string m_fileString = "";
 
-    // 时间戳状态
-    StreamWriteState m_videoWriteState = {};
-    StreamWriteState m_audioWriteState = {};
+    // 时间戳
+    // pts的单位就是以时间基为单位，表示当前帧在第几个时间基单位上
+    // 而视频的时间基就是1/帧率，音频的时间基就是1/采样率
+    // 所以视频帧的pts就是以帧为单位递增，音频帧的pts就是以采样数为单位递增
+    int m_videoFrameCount = 0; // 已写入的视频帧数
+    int m_audioFrameCount = 0; // 已写入的音频帧数
 
     AvccBox m_avcCBox = {}; // H.264 SPS/PPS数据
     bool m_spsPpsReady = false;
-
-    std::chrono::system_clock::time_point m_startTimeStamp;
-    bool m_startTimeStampSet = false; // 标记起始时间戳是否已设置
-
-    int m_fileTotalSize = 0;
 };
 
 #endif

@@ -1,7 +1,5 @@
 #include "videowriter.h"
 
-static unsigned char avcCBytes[256] = {0};
-
 VideoWriter &VideoWriter::getInstance()
 {
     static VideoWriter instance;
@@ -20,9 +18,7 @@ void VideoWriter::start(const std::string &filePath)
     m_fileString = filePath;
     m_recordStatus = true;
 
-    m_startRecordStatus = false;
-    m_fileTotalSize = 0;
-    m_startTimeStampSet = false; // 标记起始时间戳是否已设置
+    setVideoSize(640, 480);
 }
 
 void VideoWriter::stop()
@@ -30,8 +26,9 @@ void VideoWriter::stop()
     m_recordStatus = false;
 
     // 写入文件尾部（trailer）
-    if (m_pFormatContex && m_fileTotalSize > 0)
+    if (m_pFormatContex)
     {
+
         int ret = av_write_trailer(m_pFormatContex);
         if (ret != 0)
         {
@@ -44,7 +41,7 @@ void VideoWriter::stop()
     // 释放音频流
     m_pAudioStream = nullptr;
 
-    // 关闭文件IO
+    // 关闭文件IO，第二个判断条件是输出格式不包含AVFMT_NOFILE标志，表示需要手动关闭文件IO
     if (m_pFormatContex && m_pFormatContex->pb && !(m_pFormatContex->oformat->flags & AVFMT_NOFILE))
     {
         int ret = avio_close(m_pFormatContex->pb);
@@ -62,19 +59,20 @@ void VideoWriter::stop()
         m_pFormatContex = nullptr;
     }
 
-    // 释放AAC编码器配置（如有）
-    if (m_pAacEncodeConfig)
-    {
-        if (m_pAacEncodeConfig->encoder)
-        {
-            faacEncClose(m_pAacEncodeConfig->encoder);
-            m_pAacEncodeConfig->encoder = nullptr;
-        }
-        m_pAacEncodeConfig = nullptr;
-    }
-
     // 重置信息，包括起始时间戳
     resetAvDataInfo();
+}
+
+void VideoWriter::toggleRecord()
+{
+    if (m_recordStatus)
+    {
+        stop();
+    }
+    else
+    {
+        start("output.mp4");
+    }
 }
 
 void VideoWriter::initVideoWriter()
@@ -82,8 +80,7 @@ void VideoWriter::initVideoWriter()
     if (m_pFormatContex == nullptr)
     {
         m_pFormatContex = avformat_alloc_context();
-        // 制定输出格式为mov
-        m_pFormatContex->oformat = av_guess_format("mov", nullptr, nullptr);
+        m_pFormatContex->oformat = av_guess_format("mp4", nullptr, nullptr);
     }
 
     if (m_pVideoStream == nullptr)
@@ -92,11 +89,11 @@ void VideoWriter::initVideoWriter()
     }
     if (m_pAudioStream == nullptr)
     {
-        initAudioStreamInfo();
+        // initAudioStreamInfo();
     }
 
-    // 重新写入时要重置信息
-    resetAvDataInfo();
+    // 重新写入时要重置信息（保留SPS/PPS与avcC数据）
+    resetAvDataInfo(true);
     writeVideoHeader();
 }
 
@@ -223,13 +220,12 @@ void VideoWriter::initAudioStreamInfo()
 
     // AVCodecParameters是存储编解码相关信息的结构体
     AVCodecParameters *pCodecPar = m_pAudioStream->codecpar;
-    pCodecPar->codec_id = AV_CODEC_ID_AAC;         // 编码格式为AAC
-    pCodecPar->codec_type = AVMEDIA_TYPE_AUDIO;    // 媒体类型为音频
-    pCodecPar->bit_rate = 8000;                    // 比特率
-    pCodecPar->sample_rate = 8000;                 // 采样率
-    pCodecPar->channels = 1;                       // 声道数
-    pCodecPar->format = AV_SAMPLE_FMT_S16;         // 采样格式
-    pCodecPar->channel_layout = AV_CH_LAYOUT_MONO; // 声道布局为单声道
+    pCodecPar->codec_id = AV_CODEC_ID_AAC;               // 编码格式为AAC
+    pCodecPar->codec_type = AVMEDIA_TYPE_AUDIO;          // 媒体类型为音频
+    pCodecPar->bit_rate = 8000;                          // 比特率
+    pCodecPar->sample_rate = 8000;                       // 采样率
+    pCodecPar->format = AV_SAMPLE_FMT_S16;               // 采样格式
+    av_channel_layout_default(&pCodecPar->ch_layout, 1); // 声道布局为单声道
 
     /*
     构建AAC的AudioSpecificConfig数据放入extradata中
@@ -332,13 +328,16 @@ void VideoWriter::writeVideoHeader()
     }
 }
 
-void VideoWriter::resetAvDataInfo()
+void VideoWriter::resetAvDataInfo(bool keepCodecConfig)
 {
-    m_startTimeStampSet = false;
-    m_startTimeStamp = std::chrono::system_clock::time_point{};
-    m_fileTotalSize = 0;
-    memset(&m_videoWriteState, 0, sizeof(m_videoWriteState));
-    memset(&m_audioWriteState, 0, sizeof(m_audioWriteState));
+    m_startRecordStatus = false;
+    m_videoFrameCount = 0;
+    m_audioFrameCount = 0;
+    if (!keepCodecConfig)
+    {
+        m_avcCBox = AvccBox{};
+        m_spsPpsReady = false;
+    }
 }
 
 void VideoWriter::setVideoSize(int width, int height)
@@ -364,8 +363,6 @@ void VideoWriter::writeVideoData(std::vector<uint8_t> buffer, size_t length)
     H264Nalu naluUnit;
     size_t naluPos = 0;
 
-    m_avcCBox = AvccBox{};
-
     // 解析NALU单元
     while (readOneNaluFromBuff(buffer, buffer.size(), naluPos, naluUnit))
     {
@@ -377,9 +374,8 @@ void VideoWriter::writeVideoData(std::vector<uint8_t> buffer, size_t length)
                 std::copy(naluUnit.data.begin(), naluUnit.data.end(), m_avcCBox.spsBuffer.begin());
                 m_avcCBox.spsLength = naluUnit.size;
             }
-            // SPS数据读取完毕，标记SPS/PPS准备好
-            // 这时候才接受后续的I帧和P帧数据
-            m_spsPpsReady = true;
+            // SPS数据读取完毕，只有在SPS+PPS都就绪时才接受后续的I帧和P帧数据
+            m_spsPpsReady = (m_avcCBox.spsLength > 0 && m_avcCBox.ppsLength > 0);
         }
         else if (naluUnit.type == Pps)
         {
@@ -389,6 +385,7 @@ void VideoWriter::writeVideoData(std::vector<uint8_t> buffer, size_t length)
                 std::copy(naluUnit.data.begin(), naluUnit.data.end(), m_avcCBox.ppsBuffer.begin());
                 m_avcCBox.ppsLength = naluUnit.size;
             }
+            m_spsPpsReady = (m_avcCBox.spsLength > 0 && m_avcCBox.ppsLength > 0);
         }
         else if (naluUnit.type == SliceIdr)
         {
@@ -398,18 +395,11 @@ void VideoWriter::writeVideoData(std::vector<uint8_t> buffer, size_t length)
                 continue;
             }
 
-            // 接收到第一个有效帧时，设置起始时间戳
-            if (!m_startTimeStampSet)
-            {
-                m_startTimeStamp = std::chrono::system_clock::now();
-                m_startTimeStampSet = true;
-            }
             std::cout << "NALU: IDR:" << std::endl;
 
             // 构建视频帧结构体
             VideoFrame frame;
             frame.codecId = AV_CODEC_ID_H264;
-            frame.timeStamp = elapseMs();
             frame.size = naluUnit.size + 4;       // FFmpeg要求NALU前面加4字节长度信息
             frame.data[0] = naluUnit.size >> 24;  // 第一个字节存储NALU长度的高8位
             frame.data[1] = naluUnit.size >> 16;  // 第二个字节存储NALU长度的次高8位
@@ -430,14 +420,8 @@ void VideoWriter::writeVideoData(std::vector<uint8_t> buffer, size_t length)
                 std::cout << "NO SPS PPS RETURN:" << std::endl;
                 continue;
             }
-            if (!m_startTimeStampSet)
-            {
-                m_startTimeStamp = std::chrono::system_clock::now();
-                m_startTimeStampSet = true;
-            }
             VideoFrame frame;
             frame.codecId = AV_CODEC_ID_H264;
-            frame.timeStamp = elapseMs();
             frame.size = naluUnit.size + 4;
             frame.data[0] = naluUnit.size >> 24;
             frame.data[1] = naluUnit.size >> 16;
@@ -524,12 +508,6 @@ bool VideoWriter::readOneNaluFromBuff(const std::vector<uint8_t> &buffer, size_t
     return false;
 }
 
-// 根据起始时间点计算经过的毫秒数，也就是此视频的时间戳
-uint64_t VideoWriter::elapseMs() const
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - m_startTimeStamp).count();
-}
-
 // keyFlags: 1表示关键帧，0表示非关键帧
 void VideoWriter::writeVideoFrame(const VideoFrame &pData, int keyFlags)
 {
@@ -546,36 +524,22 @@ void VideoWriter::writeVideoFrame(const VideoFrame &pData, int keyFlags)
     m_startRecordStatus = true;
 
     AVPacket packet = {};
-    AVRational time_base{1, 1000};
-
-    // 如果当前为第一帧，则把上一帧时间戳记录为第一帧的时间戳
-    if (m_videoWriteState.lastInputTimestamp == 0)
-    {
-        m_videoWriteState.lastInputTimestamp = pData.timeStamp;
-    }
 
     packet.stream_index = m_pVideoStream->index;
-    packet.duration = pData.timeStamp - m_videoWriteState.lastInputTimestamp;
 
-    // 防止duration小于等于0
-    if (packet.duration <= 0)
-    {
-        std::cerr << "video duration<=0:::::: " << packet.duration << std::endl;
-        packet.duration = 1;
-    }
+    // 新逻辑：固定帧率，直接按 stream time_base 递增
+    const int64_t frameIndex = static_cast<int64_t>(m_videoFrameCount);
+    packet.duration = 1;
 
-    // 更新累计时间和最后输入时间戳
-    m_videoWriteState.totalElapsedMs += packet.duration;
-    m_videoWriteState.lastInputTimestamp = pData.timeStamp;
+    // 使用帧序号作为PTS
+    // 没有B帧，DTS等于PTS
+    packet.pts = packet.dts = frameIndex;
 
-    // 将累计时间根据时间基准转换为PTS
-    m_videoWriteState.currentPts = av_rescale_q(m_videoWriteState.totalElapsedMs, time_base, m_pVideoStream->time_base);
-    m_videoWriteState.currentTimeSec = static_cast<double>(m_videoWriteState.currentPts * m_pVideoStream->time_base.num) / m_pVideoStream->time_base.den;
+    // 更新累计帧数
+    m_videoFrameCount += 1;
 
     packet.size = static_cast<int>(pData.size);
     packet.data = const_cast<uint8_t *>(pData.data.data());
-    // 没有B帧，DTS等于PTS
-    packet.dts = packet.pts = m_videoWriteState.currentPts;
     packet.flags |= (keyFlags > 0) ? AV_PKT_FLAG_KEY : 0;
 
     // 写入一帧视频数据构建的packet
@@ -586,10 +550,6 @@ void VideoWriter::writeVideoFrame(const VideoFrame &pData, int keyFlags)
         std::cerr << "Call av_write_frame function failed, codecid:" << pData.codecId
                   << ", size:" << packet.size << ", dts:" << packet.dts
                   << ", duration:" << packet.duration << ", return:" << ret << std::endl;
-    }
-    else
-    {
-        m_fileTotalSize += packet.size;
     }
 
     av_packet_unref(&packet);
@@ -614,7 +574,6 @@ void VideoWriter::writeAudioData(std::vector<uint8_t> buffer, size_t length)
 
     AudioFrame frame;
     frame.codecId = AV_CODEC_ID_AAC;
-    frame.timeStamp = elapseMs();
     frame.size = std::min(length, frame.data.size());
     std::copy_n(buffer.begin(), frame.size, frame.data.begin());
     writeAudioStream(frame);
@@ -632,34 +591,14 @@ void VideoWriter::writeAudioStream(const AudioFrame &frame)
     }
 
     AVPacket packet = {};
-    AVRational time_base{1, 1000};
-
-    if (m_audioWriteState.lastInputTimestamp == 0)
-    {
-        m_audioWriteState.lastInputTimestamp = frame.timeStamp;
-    }
 
     packet.stream_index = m_pAudioStream->index;
-    packet.duration = frame.timeStamp - m_audioWriteState.lastInputTimestamp;
-    if (packet.duration <= 0)
-    {
-        std::cerr << "audio duration<=0:::::: " << packet.duration << std::endl;
-        packet.duration = 1;
-    }
-    m_audioWriteState.totalElapsedMs += packet.duration;
-    m_audioWriteState.lastInputTimestamp = frame.timeStamp;
-
-    int curPts = av_rescale_q(m_audioWriteState.totalElapsedMs, time_base, m_pAudioStream->time_base);
-    if (m_audioWriteState.currentPts >= curPts && curPts != 0)
-    {
-        return;
-    }
-    m_audioWriteState.currentPts = curPts;
-    m_audioWriteState.currentTimeSec = static_cast<double>(m_audioWriteState.currentPts * m_pAudioStream->time_base.num) / m_pAudioStream->time_base.den;
+    packet.duration = 1;
 
     packet.size = static_cast<int>(frame.size);
     packet.data = const_cast<uint8_t *>(frame.data.data());
-    packet.dts = packet.pts = m_audioWriteState.currentPts;
+    packet.dts = packet.pts = m_audioFrameCount;
+    m_audioFrameCount += 1;
 
     int ret = av_interleaved_write_frame(m_pFormatContex, &packet);
 
@@ -672,6 +611,5 @@ void VideoWriter::writeAudioStream(const AudioFrame &frame)
         return;
     }
 
-    m_fileTotalSize += packet.size;
     av_packet_unref(&packet);
 }
